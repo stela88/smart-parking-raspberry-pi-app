@@ -74,7 +74,7 @@ try:
 
         print("Distance sensor 2:", distance_second_sensor, "cm")
 
-        # camera
+        # camera1
 
         if distance_first_sensor <= 8:
             save_dir = '/home/sgal/images/pics/'
@@ -83,17 +83,17 @@ try:
 
             def capture_images():
                 print("Taking 10 pictures...")
-                cap = cv2.VideoCapture(0)
+                camera_1 = cv2.VideoCapture(0)
                 time.sleep(2)
 
                 os.makedirs(save_dir, exist_ok=True)
 
                 for i in range(10):
-                    ret, frame = cap.read()
+                    ret, frame = camera_1.read()
                     if ret:
                         cv2.imwrite(os.path.join(save_dir, f'image_{i}.jpg'), frame)
 
-                cap.release()
+                camera_1.release()
 
                 return glob.glob(save_dir + '*.jpg')
 
@@ -130,6 +130,65 @@ try:
             # Sending plate number to another endpoint
             response = requests.post(
                 'http://172.16.1.38:8082/tickets',
+                json={'registration': most_common_registration(registration_list)}
+            )
+        # ----------------------------------------------------------------------------------
+        # camera2
+
+        if distance_second_sensor <= 8:
+            save_dir = '/home/sgal/images/pics/'
+            print("Distance is 8cm or less. Taking pictures...")
+
+
+            def capture_images():
+                print("Taking 10 pictures...")
+                camera_2 = cv2.VideoCapture(2)
+                time.sleep(2)
+
+                os.makedirs(save_dir, exist_ok=True)
+
+                for i in range(10):
+                    ret2, frame2 = camera_2.read()
+                    if ret2:
+                        cv2.imwrite(os.path.join(save_dir, f'image_{i}.jpg'), frame2)
+
+                camera_2.release()
+
+                return glob.glob(save_dir + '*.jpg')
+
+
+            image_paths2 = capture_images()
+
+            for image_path in image_paths2:
+                image = cv2.imread(image_path)
+                success, image_jpg = cv2.imencode('.jpg', image)
+                files = {'upload': image_jpg.tobytes()}
+
+                # Delay for 1 second to avoid API throttling
+                time.sleep(1)
+
+                response = requests.post(
+                    'https://api.platerecognizer.com/v1/plate-reader/',
+                    headers={'Authorization': 'Token 397cefc199536f232215b12cc3a5651c5d8847f3'},
+                    files=files
+                )
+                response_data = response.json()
+                results = response_data.get('results', [])
+                for result in results:
+                    plate_number = result.get('plate')
+                    print("License plate number:", plate_number)
+                    registration_list.append(plate_number)
+
+            print("reg list", registration_list)
+
+
+            def most_common_registration(registration_list):
+                return max(set(registration_list), key=registration_list.count)
+
+
+            # Check if you can exit
+            response = requests.get(
+                'http://172.16.1.38:8082/tickets/registration/{registration_list}/can-exit',
                 json={'registration': most_common_registration(registration_list)}
             )
 
