@@ -9,6 +9,10 @@ import shutil
 import requests
 import json
 from fastapi import FastAPI
+from gpiozero import AngularServo
+from time import sleep
+
+servo = AngularServo(25, min_angle=-90, max_angle=90)
 
 GPIO.setmode(GPIO.BCM)
 pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
@@ -132,10 +136,12 @@ try:
                 'http://172.16.1.38:8082/tickets',
                 json={'registration': most_common_registration(registration_list)}
             )
+
         # ----------------------------------------------------------------------------------
         # camera2
 
         if distance_second_sensor <= 8:
+            servo.angle = -90
             save_dir = '/home/sgal/images/pics/'
             print("Distance is 8cm or less. Taking pictures...")
 
@@ -186,17 +192,24 @@ try:
                 return max(set(registration_list), key=registration_list.count)
 
 
+            most_common_reg = most_common_registration(registration_list)
+
             # Check if you can exit
-            response = requests.get(
-                'http://172.16.1.38:8082/tickets/registration/{registration_list}/can-exit',
+            response2 = requests.get(
+                f'http://172.16.1.38:8082/tickets/registration/{most_common_reg}/can-exit',
                 json={'registration': most_common_registration(registration_list)}
             )
+            response_data2 = response2.json()
+            print("RD", response_data2)
+            result2 = response_data2.get("canExit")
+            print("result2", result2)
+            if result2 != "False":
+                servo.angle = 90
+                sleep(2)
+
+
 
 
 except KeyboardInterrupt:
     print("Program terminated by user.")
     GPIO.cleanup()
-
-
-
-
