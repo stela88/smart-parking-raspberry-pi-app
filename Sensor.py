@@ -141,7 +141,6 @@ try:
         # camera2
 
         if distance_second_sensor <= 8:
-            servo.angle = -90
             save_dir = '/home/sgal/images/pics/'
             print("Distance is 8cm or less. Taking pictures...")
 
@@ -207,6 +206,13 @@ try:
                 servo.angle = 90
                 sleep(2)
 
+                response = requests.post(
+                    f'http://172.16.1.38:8082/tickets/registration/{most_common_reg}/exit',
+                    json={'canExit': '',
+                          'timeOfExit': ''}
+                )
+        if distance_second_sensor >= 20:
+            servo.angle = -90
 
 
 
