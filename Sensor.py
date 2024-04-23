@@ -153,7 +153,7 @@ try:
             response_data2 = response2.json()
             result2 = response_data2.get("canExit")
             print("Result 2:", result2)
-            if result2 != "False":
+            if result2 == True:
                 servo.angle = 90
                 sleep(2)
 
