@@ -60,6 +60,7 @@ def process_image(image_paths):
 
         response = requests.post(
             'https://api.platerecognizer.com/v1/plate-reader/',
+            headers={'Authorization': 'Token 397cefc199536f232215b12cc3a5651c5d8847f3'},
             files=files
         )
         response_data = response.json()
