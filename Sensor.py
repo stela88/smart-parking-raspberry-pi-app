@@ -2,31 +2,17 @@ import RPi.GPIO as GPIO
 import time
 import cv2
 import os
-import numpy as np
-import pytesseract
 import glob
-import shutil
 import requests
-import json
-from fastapi import FastAPI
 from gpiozero import AngularServo
 from time import sleep
+import json
 
 servo = AngularServo(25, min_angle=-90, max_angle=90)
-
 GPIO.setmode(GPIO.BCM)
-pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
-app = FastAPI()
-
-TRIG1 = 23
-ECHO1 = 24
-TRIG2 = 21
-ECHO2 = 20
-
-GPIO.setup(TRIG1, GPIO.OUT)
-GPIO.setup(ECHO1, GPIO.IN)
-GPIO.setup(ECHO2, GPIO.IN)
-GPIO.setup(TRIG2, GPIO.OUT)
+TRIG1, ECHO1, TRIG2, ECHO2 = 23, 24, 21, 20
+GPIO.setup([TRIG1, TRIG2], GPIO.OUT)
+GPIO.setup([ECHO1, ECHO2], GPIO.IN)
 
 GPIO.output(TRIG1, False)
 print("Waiting For Sensor 1 To Settle")
@@ -37,183 +23,145 @@ time.sleep(2)
 
 registration_list = []
 
+
+def get_distance(TRIG, ECHO):
+    GPIO.output(TRIG, True)
+    time.sleep(0.1)
+    GPIO.output(TRIG, False)
+    pulse_start, pulse_end = 0, 0
+
+    while GPIO.input(ECHO) == 0:
+        pulse_start = time.time()
+    while GPIO.input(ECHO) == 1:
+        pulse_end = time.time()
+
+    pulse_duration = pulse_end - pulse_start
+    return round(pulse_duration * 17150, 2)
+
+
+def capture_images(camera):
+    print("Taking 10 pictures...")
+    save_dir = '/home/sgal/images/pics/'
+    os.makedirs(save_dir, exist_ok=True)
+
+    for i in range(10):
+        ret, frame = camera.read()
+        if ret:
+            cv2.imwrite(os.path.join(save_dir, f'image_{i}.jpg'), frame)
+    return glob.glob(save_dir + '*.jpg')
+
+
+def process_image(image_paths):
+    for image_path in image_paths:
+        image = cv2.imread(image_path)
+        success, image_jpg = cv2.imencode('.jpg', image)
+        files = {'upload': image_jpg.tobytes()}
+        time.sleep(1)
+
+        response = requests.post(
+            'https://api.platerecognizer.com/v1/plate-reader/',
+            files=files
+        )
+        response_data = response.json()
+        results = response_data.get('results', [])
+        for result in results:
+            plate_number = result.get('plate')
+            print("License plate number:", plate_number)
+            registration_list.append(plate_number)
+
+
+def main_process(distance_sensor, camera):
+    image_paths = capture_images(camera)
+    process_image(image_paths)
+
+
 try:
     while True:
-
-        # first sensor
-
-        GPIO.output(TRIG1, True)
-        time.sleep(0.1)
-        GPIO.output(TRIG1, False)
-
-        while GPIO.input(ECHO1) == 0:
-            pulse_start = time.time()
-
-        while GPIO.input(ECHO1) == 1:
-            pulse_end = time.time()
-
-        pulse_duration_first = pulse_end - pulse_start
-
-        distance_first = pulse_duration_first * 17150
-        distance_first_sensor = round(distance_first, 2)
-
+        # First sensor
+        distance_first_sensor = get_distance(TRIG1, ECHO1)
         print("Distance sensor 1:", distance_first_sensor, "cm")
 
-        # second sensor
-
-        GPIO.output(TRIG2, True)
-        time.sleep(0.1)
-        GPIO.output(TRIG2, False)
-
-        while GPIO.input(ECHO2) == 0:
-            pulse_start = time.time()
-
-        while GPIO.input(ECHO2) == 1:
-            pulse_end = time.time()
-
-        pulse_duration_second = pulse_end - pulse_start
-
-        distance_second = pulse_duration_second * 17150
-        distance_second_sensor = round(distance_second, 2)
-
+        # Second sensor
+        distance_second_sensor = get_distance(TRIG2, ECHO2)
         print("Distance sensor 2:", distance_second_sensor, "cm")
 
-        # camera1
-
+        # Camera 1
         if distance_first_sensor <= 8:
-            save_dir = '/home/sgal/images/pics/'
-            print("Distance is 8cm or less. Taking pictures...")
+            main_process(distance_first_sensor, cv2.VideoCapture(0))
+            print("Registration list:", registration_list)
 
+            most_common_reg = max(set(registration_list), key=registration_list.count)
 
-            def capture_images():
-                print("Taking 10 pictures...")
-                camera_1 = cv2.VideoCapture(0)
-                time.sleep(2)
-
-                os.makedirs(save_dir, exist_ok=True)
-
-                for i in range(10):
-                    ret, frame = camera_1.read()
-                    if ret:
-                        cv2.imwrite(os.path.join(save_dir, f'image_{i}.jpg'), frame)
-
-                camera_1.release()
-
-                return glob.glob(save_dir + '*.jpg')
-
-
-            image_paths = capture_images()
-
-            for image_path in image_paths:
-                image = cv2.imread(image_path)
-                success, image_jpg = cv2.imencode('.jpg', image)
-                files = {'upload': image_jpg.tobytes()}
-
-                # Delay for 1 second to avoid API throttling
-                time.sleep(1)
-
-                response = requests.post(
-                    'https://api.platerecognizer.com/v1/plate-reader/',
-                    headers={'Authorization': 'Token 397cefc199536f232215b12cc3a5651c5d8847f3'},
-                    files=files
-                )
-                response_data = response.json()
-                results = response_data.get('results', [])
-                for result in results:
-                    plate_number = result.get('plate')
-                    print("License plate number:", plate_number)
-                    registration_list.append(plate_number)
-
-            print("reg list", registration_list)
-
-
-            def most_common_registration(registration_list):
-                return max(set(registration_list), key=registration_list.count)
-
-
-            # Sending plate number to another endpoint
-            response = requests.post(
-                'http://172.16.1.38:8082/tickets',
-                json={'registration': most_common_registration(registration_list)}
+            response_get = requests.get(
+                f'http://172.16.1.38:8082/tickets/registration/{most_common_reg}'
             )
+            if (response_get.status_code != 200):
+                print("Registration not found. Proceeding to create new ticket.")
 
-        # ----------------------------------------------------------------------------------
-        # camera2
-
-        if distance_second_sensor <= 8:
-            save_dir = '/home/sgal/images/pics/'
-            print("Distance is 8cm or less. Taking pictures...")
-
-
-            def capture_images():
-                print("Taking 10 pictures...")
-                camera_2 = cv2.VideoCapture(2)
-                time.sleep(2)
-
-                os.makedirs(save_dir, exist_ok=True)
-
-                for i in range(10):
-                    ret2, frame2 = camera_2.read()
-                    if ret2:
-                        cv2.imwrite(os.path.join(save_dir, f'image_{i}.jpg'), frame2)
-
-                camera_2.release()
-
-                return glob.glob(save_dir + '*.jpg')
-
-
-            image_paths2 = capture_images()
-
-            for image_path in image_paths2:
-                image = cv2.imread(image_path)
-                success, image_jpg = cv2.imencode('.jpg', image)
-                files = {'upload': image_jpg.tobytes()}
-
-                # Delay for 1 second to avoid API throttling
-                time.sleep(1)
-
-                response = requests.post(
-                    'https://api.platerecognizer.com/v1/plate-reader/',
-                    headers={'Authorization': 'Token 397cefc199536f232215b12cc3a5651c5d8847f3'},
-                    files=files
+                # Create new ticket
+                response_create = requests.post(
+                    'http://172.16.1.38:8082/tickets',
+                    json={'registration': most_common_reg}
                 )
-                response_data = response.json()
-                results = response_data.get('results', [])
-                for result in results:
-                    plate_number = result.get('plate')
-                    print("License plate number:", plate_number)
-                    registration_list.append(plate_number)
+                print("Created new ticket:", response_create.status_code)
 
-            print("reg list", registration_list)
+            else:
+                ticket_data = response_get.json()
+                ticket_id = ticket_data.get('ticketId')
+                print("Found ticket ID:", ticket_id)
 
+                # Delete transaction
 
-            def most_common_registration(registration_list):
-                return max(set(registration_list), key=registration_list.count)
+                response_transactions = requests.get(
+                    f'http://172.16.1.38:8082/transactions'
+                )
 
+                transactions = response_transactions.json()
+                for transaction in transactions:
+                    if transaction['ticket']['ticketId'] == ticket_id:
+                        transaction_id = transaction['transactionId']
+                        response_delete_transaction = requests.delete(
+                            f'http://172.16.1.38:8082/transactions/{transaction_id}'
+                        )
+                        print("Deleted transaction:", response_delete_transaction.status_code)
 
-            most_common_reg = most_common_registration(registration_list)
+                # Delete old ticket if registration exists
+                response_delete = requests.delete(
+                    f'http://172.16.1.38:8082/tickets/{ticket_id}'
+                )
+                print("Deleted old ticket:", response_delete.status_code)
+
+                response_create = requests.post(
+                    'http://172.16.1.38:8082/tickets',
+                    json={'registration': most_common_reg}
+                )
+                print("Created new ticket:", response_create.status_code)
+
+        # Camera 2
+        if distance_second_sensor <= 8:
+            main_process(distance_second_sensor, cv2.VideoCapture(2))
+            print("Registration list:", registration_list)
+
+            most_common_reg = max(set(registration_list), key=registration_list.count)
 
             # Check if you can exit
             response2 = requests.get(
                 f'http://172.16.1.38:8082/tickets/registration/{most_common_reg}/can-exit',
-                json={'registration': most_common_registration(registration_list)}
+                json={'registration': most_common_reg}
             )
             response_data2 = response2.json()
-            print("RD", response_data2)
             result2 = response_data2.get("canExit")
-            print("result2", result2)
+            print("Result 2:", result2)
             if result2 != "False":
                 servo.angle = 90
                 sleep(2)
 
                 response = requests.post(
                     f'http://172.16.1.38:8082/tickets/registration/{most_common_reg}/exit',
-                    json={'canExit': '',
-                          'timeOfExit': ''}
+                    json={'canExit': '', 'timeOfExit': ''}
                 )
         if distance_second_sensor >= 20:
             servo.angle = -90
-
 
 
 except KeyboardInterrupt:
