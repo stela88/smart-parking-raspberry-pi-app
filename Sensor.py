@@ -8,7 +8,8 @@ from gpiozero import AngularServo
 from time import sleep
 import json
 
-servo = AngularServo(25, min_angle=-90, max_angle=90)
+servo1 = AngularServo(12, min_angle=-90, max_angle=90)
+servo2 = AngularServo(25, min_angle=-90, max_angle=90)
 GPIO.setmode(GPIO.BCM)
 TRIG1, ECHO1, TRIG2, ECHO2 = 23, 24, 21, 20
 GPIO.setup([TRIG1, TRIG2], GPIO.OUT)
@@ -105,6 +106,8 @@ try:
                     json={'registration': most_common_reg}
                 )
                 print("Created new ticket:", response_create.status_code)
+                servo1.angle = 90
+                sleep(2)
 
             else:
                 ticket_data = response_get.json()
@@ -137,6 +140,11 @@ try:
                     json={'registration': most_common_reg}
                 )
                 print("Created new ticket:", response_create.status_code)
+                servo1.angle = 90
+                sleep(2)
+
+        if distance_first_sensor >= 20:
+            servo1.angle = -90
 
         # Camera 2
         if distance_second_sensor <= 8:
@@ -154,7 +162,7 @@ try:
             result2 = response_data2.get("canExit")
             print("Result 2:", result2)
             if result2 == True:
-                servo.angle = 90
+                servo2.angle = 90
                 sleep(2)
 
                 response = requests.post(
@@ -162,7 +170,7 @@ try:
                     json={'canExit': '', 'timeOfExit': ''}
                 )
         if distance_second_sensor >= 20:
-            servo.angle = -90
+            servo2.angle = -90
 
 
 except KeyboardInterrupt:
