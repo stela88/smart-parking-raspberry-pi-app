@@ -1,0 +1,55 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sensor-ingress
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: sensor-service
+                port:
+                  number: 83
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sensor-service
+spec:
+  selector:
+    app: sensor-app
+  ports:
+    - protocol: TCP
+      port: 83
+      targetPort: 8083
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sensor-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sensor-app
+  template:
+    metadata:
+      labels:
+        app: sensor-app
+    spec:
+      containers:
+        - name: sensor-container
+          image: sgal88/sgalk3s:1.0
+          imagePullPolicy: Always
+          securityContext:
+            privileged: true
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          ports:
+            - containerPort: 8083
